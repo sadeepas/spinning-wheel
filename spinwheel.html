@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spin the Lucky Wheel!</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { scroll-behavior: smooth; }
+        @keyframes bounceOnClick { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.95); } }
+        .animate-bounce-click { animation: bounceOnClick 0.2s ease-in-out; }
+
+        .wheel-segment-text {
+            position: absolute; top: 50%; left: 50%;
+            transform-origin: center center; text-align: center;
+            pointer-events: none; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .segment-text-stacked {
+            white-space: normal !important; line-height: 0.9em;
+            overflow: visible !important; text-overflow: clip !important;
+        }
+
+        .wheel-pointer {
+            width: 0; height: 0; border-left: 20px solid transparent;
+            border-right: 20px solid transparent; border-bottom: 30px solid #facc15; /* yellow-400 */
+            /* MODIFIED: Slightly deeper and softer shadow for more prominence */
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+        }
+        #wheel {
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.2), 0 0 20px rgba(128,0,128,0.15);
+            transition: border-color 0.3s ease-out, box-shadow 0.3s ease-out, transform var(--spin-duration, 6000ms) var(--spin-timing, cubic-bezier(0.25, 0.1, 0.25, 1));
+        }
+
+        #spinButton:not(:disabled):hover { animation: pulseGlow 1.5s infinite; }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 5px #a855f7, 0 0 10px #a855f7, 0 0 15px #a855f780; transform: scale(1.02); }
+            50% { box-shadow: 0 0 10px #c084fc, 0 0 20px #c084fc, 0 0 30px #c084fc80; transform: scale(1.05); }
+        }
+
+        .popup-enter { opacity: 0; transform: scale(0.9); }
+        .popup-enter-active { opacity: 1; transform: scale(1); transition: opacity 300ms ease-out, transform 300ms ease-out; }
+        .popup-leave-active { opacity: 0; transform: scale(0.95); transition: opacity 200ms ease-in, transform 200ms ease-in; }
+
+        .legend-item-color {
+            width: 1em; height: 1em; border-radius: 0.25rem; display: inline-block; margin-right: 0.5em;
+            border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        #customizationPanel.panel-enter { opacity: 0; transform: translateY(20px) scale(0.98); }
+        #customizationPanel.panel-enter-active { opacity: 1; transform: translateY(0) scale(1); transition: opacity 300ms ease-out, transform 300ms ease-out; }
+        #customizationPanel.panel-leave-active { opacity: 0; transform: translateY(10px) scale(0.98); transition: opacity 200ms ease-in, transform 200ms ease-in; }
+        
+        #customizationPanelContent::-webkit-scrollbar { width: 8px; }
+        #customizationPanelContent::-webkit-scrollbar-track { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        #customizationPanelContent::-webkit-scrollbar-thumb { background: #a855f7; border-radius: 10px; }
+        #customizationPanelContent::-webkit-scrollbar-thumb:hover { background: #c084fc; }
+
+        /* --- ENHANCED FULLSCREEN STYLES --- */
+        @keyframes fullscreenPulseAndShift {
+            0% {
+                background-position: 0% 0%;
+                background-size: 150% 150%;
+            }
+            25% {
+                background-position: 25% 25%;
+                background-size: 160% 160%;
+            }
+            50% {
+                background-position: 50% 50%;
+                background-size: 150% 150%;
+            }
+            75% {
+                background-position: 25% 25%; /* Changed from 75% 75% to make it shift back and forth */
+                background-size: 160% 160%;
+            }
+            100% {
+                background-position: 0% 0%;
+                background-size: 150% 150%;
+            }
+        }
+
+        main:fullscreen, main:-webkit-full-screen, main:-moz-full-screen, main:-ms-fullscreen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem; /* Default padding for smaller screens */
+            gap: 1.5rem;   /* Default gap for smaller screens */
+            background: radial-gradient(ellipse at center, #4c1d95 0%, #3b0764 30%, #2c1a4d 60%, #1a0f2e 85%, #0e081a 100%); /* Enhanced gradient */
+            animation: fullscreenPulseAndShift 30s linear infinite;
+            overflow-y: auto;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            max-width: none !important; /* Ensure it takes full width, overriding Tailwind's max-w */
+            margin: 0 !important; /* Ensure no auto margins */
+        }
+        /* Responsive adjustments for fullscreen gap and padding */
+        @media (min-width: 768px) { /* md breakpoint */
+            main:fullscreen, main:-webkit-full-screen, main:-moz-full-screen, main:-ms-fullscreen {
+                gap: 2rem;
+            }
+        }
+        @media (min-width: 1024px) { /* lg breakpoint */
+            main:fullscreen, main:-webkit-full-screen, main:-moz-full-screen, main:-ms-fullscreen {
+                flex-direction: row; /* Switch to row layout for larger screens */
+                padding: 2rem;
+                gap: 3rem;
+            }
+        }
+        /* --- END ENHANCED FULLSCREEN STYLES --- */
+
+
+        main.fullscreen-active > .wheel-section-wrapper,
+        main.fullscreen-active > #resultsLegendContainer {
+            opacity: 0; transform: translateY(15px) scale(0.97);
+            animation: contentEnterFullscreen 0.45s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+        }
+        main.fullscreen-active > .wheel-section-wrapper { animation-delay: 0.05s; }
+        main.fullscreen-active > #resultsLegendContainer { animation-delay: 0.15s; }
+
+        @keyframes contentEnterFullscreen { to { opacity: 1; transform: translateY(0) scale(1); } }
+
+        .wheel-flash-spin-again {
+            border-color: #fde047 !important; /* Tailwind yellow-300 */
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.2), 0 0 20px rgba(128,0,128,0.15), 0 0 30px 10px #fde047 !important;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-purple-950 via-indigo-950 to-slate-950 min-h-screen flex flex-col items-center justify-center p-4 lg:p-6 overflow-x-hidden font-sans text-slate-100">
+
+    <div class="fixed top-4 right-4 z-30 flex space-x-3">
+        <button id="fullscreenButton" title="Enter Fullscreen" class="p-3 bg-purple-600/70 hover:bg-purple-500 rounded-full shadow-lg transition-all text-white focus:outline-none focus:ring-2 focus:ring-purple-400">
+            <i id="fullscreenIcon" class="fas fa-expand fa-lg"></i>
+        </button>
+        <button id="openSettingsButton" title="Customize Wheel" class="p-3 bg-purple-600/70 hover:bg-purple-500 rounded-full shadow-lg transition-all text-white focus:outline-none focus:ring-2 focus:ring-purple-400">
+            <i class="fas fa-cog fa-lg"></i>
+        </button>
+    </div>
+
+    <header class="mb-6 md:mb-10 text-center">
+        <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold text-white drop-shadow-lg">
+            Spin the <span class="text-yellow-300 drop-shadow-[0_0_10px_rgba(250,204,21,0.9)]">Lucky Wheel!</span>
+        </h1>
+        <p class="text-purple-300 mt-2 sm:mt-3 text-sm sm:text-base">Test your luck and win big!</p>
+    </header>
+
+    <main class="flex flex-col lg:flex-row items-center lg:items-start justify-center gap-8 lg:gap-12 xl:gap-16 w-full max-w-6xl mx-auto">
+        <div class="wheel-section-wrapper relative flex flex-col items-center justify-center">
+            <div class="absolute w-72 h-72 sm:w-80 sm:h-80 md:w-[480px] md:h-[480px] bg-purple-600/30 rounded-full blur-3xl -z-10 animate-pulse"></div>
+            <div class="wheel-pointer absolute top-[-10px] md:top-[-13px] left-1/2 -translate-x-1/2 z-20"></div>
+            <div id="wheelContainerOuter" class="p-2 sm:p-3 bg-purple-800/20 rounded-full shadow-2xl mb-6 md:mb-8 relative">
+                <div id="wheelContainer" class="relative w-60 h-60 sm:w-72 sm:h-72 md:w-96 md:h-96">
+                    <div id="wheel" class="w-full h-full rounded-full border-4 border-purple-400/60 overflow-hidden relative shadow-inner"></div>
+                </div>
+            </div>
+            <!-- MODIFIED: shadow-xl and disabled:shadow-lg for spin button -->
+            <button id="spinButton" class="px-10 py-4 bg-purple-600 hover:bg-purple-700 text-white text-xl md:text-2xl font-semibold rounded-lg shadow-xl
+                                           transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-purple-950
+                                           disabled:bg-purple-400/70 disabled:opacity-70 disabled:cursor-not-allowed disabled:shadow-lg disabled:hover:bg-purple-400/70">
+                <span class="flex items-center justify-center">
+                    <i class="fas fa-sync-alt mr-3 hidden" id="spinIcon"></i> Spin the Wheel!
+                </span>
+            </button>
+        </div>
+
+        <aside id="resultsLegendContainer" class="w-full lg:w-72 xl:w-80 p-4 bg-slate-800/40 backdrop-blur-md rounded-xl shadow-xl">
+            <h2 class="text-xl sm:text-2xl font-semibold text-purple-300 mb-4 text-center border-b border-purple-400/40 pb-3 tracking-tight">Prize Board</h2>
+            <ul id="resultsLegend" class="space-y-2.5 max-h-[280px] sm:max-h-[320px] md:max-h-[420px] overflow-y-auto pr-1.5"></ul>
+        </aside>
+    </main>
+
+    <footer class="text-center py-6 mt-auto">
+        <span class="inline-block px-4 py-2 bg-purple-800/30 border border-purple-700/50 rounded-lg shadow-md">
+            <p class="text-sm text-purple-300/80">
+                <i class="fas fa-palette mr-2 opacity-70"></i>Designed by <span class="font-semibold text-purple-300">Sadeepa Lakshan</span>
+            </p>
+        </span>
+    </footer>
+
+    <div id="resultPopup" class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden popup-enter">
+        <div id="resultPopupContent" class="relative bg-gradient-to-br from-purple-700 via-indigo-800 to-blue-800 p-6 sm:p-8 md:p-10 rounded-2xl shadow-2xl text-center text-white max-w-md w-full">
+            <button id="dismissPopup" title="Close" class="absolute top-3 right-3 text-purple-300 hover:text-yellow-300 transition-colors p-2 rounded-full focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h2 id="congratsTitle" class="text-3xl md:text-4xl font-bold mb-2 text-yellow-300 mt-4"></h2>
+            <p id="resultInfoText" class="text-lg sm:text-xl md:text-2xl mb-4 text-purple-200">You've won:</p>
+            <p id="resultText" class="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-8 break-words animate-pulse"></p>
+            <button id="popupActionButton" class="px-8 py-3 bg-yellow-400 hover:bg-yellow-500 text-slate-900 text-lg font-semibold rounded-lg">Awesome!</button>
+        </div>
+    </div>
+
+    <div id="customizationPanel" class="fixed inset-0 bg-slate-900/80 backdrop-blur-lg flex items-center justify-center p-4 z-[60] hidden panel-enter">
+        <div class="bg-gradient-to-br from-indigo-800 via-purple-800 to-slate-800 p-6 sm:p-8 rounded-2xl shadow-2xl w-full max-w-2xl relative">
+            <button id="closeCustomizationPanelButton" class="absolute top-4 right-4 text-purple-300 hover:text-yellow-300 transition-colors"><i class="fas fa-times fa-2x"></i></button>
+            <h2 class="text-2xl sm:text-3xl font-bold text-yellow-300 mb-6 text-center">Customize Wheel</h2>
+            <div class="mb-6">
+                <label for="numSegmentsInput" class="block text-sm font-medium text-purple-200 mb-1">Number of Prizes (2-16):</label>
+                <input type="number" id="numSegmentsInput" min="2" max="16" class="w-full p-2.5 bg-slate-700/50 border border-purple-500/50 rounded-lg text-white focus:ring-purple-400 focus:border-purple-400 placeholder-slate-400">
+            </div>
+            <div id="customizationPanelContent" class="max-h-[50vh] overflow-y-auto space-y-4 pr-2 mb-6"></div>
+            <div class="flex justify-end space-x-3">
+                <button id="applyCustomizationButton" class="px-6 py-2.5 bg-yellow-400 hover:bg-yellow-500 text-slate-900 font-semibold rounded-lg">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <audio id="spinSound" src="spin-sound.mp3" preload="auto" loop></audio>
+    <audio id="tickSound" src="tick-sound.mp3" preload="auto"></audio>
+    <audio id="winSound" src="win-sound.mp3" preload="auto"></audio>
+
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const wheel = document.getElementById('wheel');
+        const spinButton = document.getElementById('spinButton');
+        const spinIcon = document.getElementById('spinIcon');
+        const resultPopup = document.getElementById('resultPopup');
+        const resultPopupContent = document.getElementById('resultPopupContent');
+        const congratsTitle = document.getElementById('congratsTitle');
+        const resultInfoText = document.getElementById('resultInfoText');
+        const resultText = document.getElementById('resultText');
+        const popupActionButton = document.getElementById('popupActionButton'); 
+        const dismissPopupButton = document.getElementById('dismissPopup'); 
+        const resultsLegend = document.getElementById('resultsLegend');
+        const spinSound = document.getElementById('spinSound');
+        const tickSound = document.getElementById('tickSound');
+        const winSound = document.getElementById('winSound');
+        const openSettingsButton = document.getElementById('openSettingsButton');
+        const customizationPanel = document.getElementById('customizationPanel');
+        const closeCustomizationPanelButton = document.getElementById('closeCustomizationPanelButton');
+        const numSegmentsInput = document.getElementById('numSegmentsInput');
+        const segmentInputsContainer = document.getElementById('customizationPanelContent');
+        const applyCustomizationButton = document.getElementById('applyCustomizationButton');
+        const fullscreenButton = document.getElementById('fullscreenButton');
+        const fullscreenIcon = document.getElementById('fullscreenIcon');
+        const mainElement = document.querySelector('main');
+
+        const baseColors = [ '#fde047', '#f43f5e', '#f59e0b', '#fb923c', '#ef4444', '#f97316', '#fda4af', '#a855f7', '#84cc16', '#22c55e', '#10b981', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#ec4899' ];
+        let segmentsConfig = [
+            { label: '100 Points', color: '#fde047', probability: 0.1 }, { label: 'Grand Prize', color: '#84cc16', probability: 0.05 },
+            { label: 'Spin Again', color: '#0ea5e9', probability: 0.05 }, 
+            { label: 'Watermelon', color: '#f43f5e', probability: 0.07 }, { label: 'Pineapple', color: '#f59e0b', probability: 0.1 },
+            { label: 'Mango', color: '#fb923c', probability: 0.12 }, { label: 'Apple', color: '#ef4444', probability: 0.13 },
+            { label: 'Orange', color: '#f97316', probability: 0.13 }, { label: 'Peach', color: '#fda4af', probability: 0.1 },
+            { label: 'Grape', color: '#a855f7', probability: 0.1 }, { label: 'Mystery Box', color: '#3b82f6', probability: 0.05 }
+        ];
+
+        segmentsConfig = segmentsConfig.map(segment => {
+            let newLabel = segment.label.replace(/\bremu\b/gi, '');
+            newLabel = newLabel.replace(/\s{2,}/g, ' ').trim();
+            return { ...segment, label: newLabel };
+        });
+
+        let numSegments = segmentsConfig.length;
+        let segmentAngle = 360 / numSegments;
+        let currentRotation = 0; 
+        let isSpinning = false;
+        const spinDurationBase = 6000; 
+        const spinTransitionTiming = 'cubic-bezier(0.25, 0.1, 0.25, 1)';
+        let tickIntervalId = null;
+        const approxFullSpins = 6; 
+        const STACKED_TEXT_THRESHOLD = 3;
+
+        function updateWheelTransition() {
+            if(wheel) {
+                wheel.style.setProperty('--spin-duration', `${spinDurationBase}ms`);
+                wheel.style.setProperty('--spin-timing', spinTransitionTiming);
+                wheel.style.transition = ''; 
+            }
+        }
+        
+        function initWheel() { 
+            if (!wheel) return;
+            clearWheelLabels();
+            clearLegend();
+            wheel.style.backgroundImage = '';
+            
+            numSegments = segmentsConfig.length;
+            if (numSegments === 0) {
+                resultsLegend.innerHTML = '<li class="text-slate-400 text-center p-4">No prizes configured. Open settings to add some!</li>';
+                spinButton.disabled = true;
+                return;
+            }
+            spinButton.disabled = false;
+            segmentAngle = 360 / numSegments;
+
+            let conicGradientString = 'conic-gradient(';
+            segmentsConfig.forEach((segment, i) => {
+                const textElement = document.createElement('div');
+                textElement.classList.add('wheel-segment-text', 'text-[0.6rem]', 'sm:text-[0.65rem]', 'md:text-[0.75rem]', 'lg:text-[0.8rem]', 'font-medium', 'text-white', 'select-none');
+                textElement.style.setProperty('--tw-text-opacity', '0.95');
+                textElement.style.textShadow = '0px 1px 2px rgba(0,0,0,0.7)';
+                
+                const label = segment.label;
+                const wheelActualWidth = wheel.offsetWidth || parseFloat(getComputedStyle(wheel).width);
+
+                if (label.length <= STACKED_TEXT_THRESHOLD && label.length > 0) {
+                    textElement.innerHTML = label.split('').join('<br>');
+                    textElement.classList.add('segment-text-stacked');
+                    textElement.style.removeProperty('max-width'); 
+                } else {
+                    textElement.textContent = label;
+                    textElement.classList.remove('segment-text-stacked');
+                    let radiusForMaxWidthCalc; 
+                     if (numSegments <= 6) radiusForMaxWidthCalc = 40; else if (numSegments <= 8) radiusForMaxWidthCalc = 38; else radiusForMaxWidthCalc = 36;
+                    const arcLengthAtRadius = (segmentAngle * Math.PI / 180) * (wheelActualWidth / 2 * (radiusForMaxWidthCalc / 100));
+                    textElement.style.maxWidth = `${Math.max(20, arcLengthAtRadius * 0.55)}px`; 
+                }
+
+                const midAngle = (i * segmentAngle) + (segmentAngle / 2);
+                let radiusPercentage; 
+                if (numSegments <= 4) radiusPercentage = 46;
+                else if (numSegments <= 6) radiusPercentage = 44;
+                else if (numSegments <= 8) radiusPercentage = 42;
+                else if (numSegments <= 10) radiusPercentage = 40;
+                else if (numSegments <= 12) radiusPercentage = 38;
+                else radiusPercentage = 36;
+
+                const textX = radiusPercentage * Math.cos((midAngle - 90) * Math.PI / 180);
+                const textY = radiusPercentage * Math.sin((midAngle - 90) * Math.PI / 180);
+                textElement.style.transform = `translate(-50%, -50%) translate(${textX}%, ${textY}%) rotate(${midAngle}deg)`;
+                wheel.appendChild(textElement);
+
+                const startAngleDeg = i * segmentAngle;
+                const endAngleDeg = (i + 1) * segmentAngle;
+                conicGradientString += `${segment.color} ${startAngleDeg}deg ${endAngleDeg}deg`;
+                if (i < numSegments - 1) conicGradientString += ', ';
+
+                const listItem = document.createElement('li');
+                listItem.classList.add('flex', 'items-center', 'text-sm', 'sm:text-base', 'text-slate-200', 'p-2.5', 'rounded-lg', 'hover:bg-slate-700/60', 'transition-colors', 'duration-150');
+                listItem.innerHTML = `
+                    <span class="legend-item-color w-4 h-4 mr-3 rounded-sm shrink-0" style="background-color: ${segment.color};"></span>
+                    <span class="flex-1 truncate">${segment.label || "Unnamed Prize"}</span>`;
+                resultsLegend.appendChild(listItem);
+            });
+            conicGradientString += ')';
+            wheel.style.backgroundImage = conicGradientString;
+        }
+        function clearWheelLabels() { if(wheel) wheel.querySelectorAll('.wheel-segment-text').forEach(label => label.remove()); }
+        function clearLegend() { if(resultsLegend) resultsLegend.innerHTML = ''; }
+        
+        function getWeightedResult() { 
+            if (segmentsConfig.length === 0) return -1;
+
+            let totalProbability = segmentsConfig.reduce((sum, seg) => sum + seg.probability, 0);
+            let tempSegmentsConfig = JSON.parse(JSON.stringify(segmentsConfig)); 
+
+            if (Math.abs(totalProbability - 1.0) > 0.001 && totalProbability > 0) {
+                const factor = 1.0 / totalProbability;
+                tempSegmentsConfig.forEach(seg => seg.probability *= factor);
+            } else if (totalProbability === 0 && tempSegmentsConfig.length > 0) {
+                tempSegmentsConfig.forEach(seg => seg.probability = 1 / tempSegmentsConfig.length);
+            }
+            const rand = Math.random(); let cumulativeProbability = 0;
+            for (let i = 0; i < tempSegmentsConfig.length; i++) {
+                cumulativeProbability += tempSegmentsConfig[i].probability;
+                if (rand <= cumulativeProbability) return i;
+            }
+            return tempSegmentsConfig.length > 0 ? tempSegmentsConfig.length - 1 : 0;
+        }
+        function playTickSound() { 
+             try { if (tickSound.HAVE_ENOUGH_DATA) { tickSound.currentTime = 0; tickSound.play().catch(e => {}); } } catch(e){}
+        }
+
+        function showResultPopup() {
+            resultPopup.classList.remove('hidden', 'popup-enter', 'popup-leave-active');
+            resultPopupContent.classList.remove('scale-100'); 
+            requestAnimationFrame(() => { 
+                resultPopup.classList.add('popup-enter-active'); 
+                resultPopupContent.classList.add('scale-100'); 
+            });
+        }
+
+        function hideResultPopup(triggerSpinAgainAction = false) {
+            resultPopup.classList.remove('popup-enter-active');
+            resultPopup.classList.add('popup-leave-active');
+            setTimeout(() => {
+                resultPopup.classList.add('hidden');
+                resultPopup.classList.remove('popup-leave-active');
+                resultPopupContent.classList.remove('scale-100');
+                resultPopupContent.classList.add('scale-95');
+                if (triggerSpinAgainAction) {
+                    setTimeout(spinWheel, 50); 
+                }
+            }, 200); 
+        }
+
+        function spinWheel() {
+            if (isSpinning || segmentsConfig.length === 0) return;
+            isSpinning = true;
+            spinButton.disabled = true; spinButton.classList.add('animate-bounce-click');
+            spinIcon.classList.remove('hidden'); spinIcon.classList.add('animate-spin');
+            
+            updateWheelTransition();
+
+            try { 
+                if(spinSound.HAVE_ENOUGH_DATA && !spinSound.loop) { spinSound.currentTime = 0; spinSound.play().catch(e => console.warn("Spin sound error:", e));}
+                else if (spinSound.loop && spinSound.paused) { spinSound.play().catch(e => console.warn("Looping spin sound error:", e)); }
+            } catch (e) { console.warn("Audio API error (spin):", e); }
+
+            const totalTicks = numSegments * approxFullSpins * 1.5; 
+            const tickInterval = spinDurationBase / totalTicks;
+            if (tickIntervalId) clearInterval(tickIntervalId); 
+            tickIntervalId = setInterval(playTickSound, tickInterval);
+
+            const winningSegmentIndex = getWeightedResult();
+            if (winningSegmentIndex === -1) {
+                isSpinning = false; spinButton.disabled = false; spinIcon.classList.add('hidden'); spinIcon.classList.remove('animate-spin');
+                return;
+            }
+            const winningSegment = segmentsConfig[winningSegmentIndex];
+            const baseTargetAngle = (winningSegmentIndex * segmentAngle) + (segmentAngle / 2); 
+            let rotationForSegment = 360 - baseTargetAngle; 
+            
+            const fullSpinsVal = (approxFullSpins -1 + Math.floor(Math.random() * 3)) * 360; 
+            const maxOffsetDegrees = (segmentAngle / 2) * 0.7; 
+            const randomOffset = (Math.random() * maxOffsetDegrees * 2) - maxOffsetDegrees;
+            rotationForSegment += randomOffset;
+            
+            const newRotation = currentRotation + fullSpinsVal + rotationForSegment;
+            
+            wheel.style.transform = `rotate(${newRotation}deg)`; 
+            
+            setTimeout(() => {
+                clearInterval(tickIntervalId);
+                tickIntervalId = null;
+                if (spinSound.loop) spinSound.pause();
+                
+                currentRotation = newRotation % 360;
+                if(currentRotation < 0) currentRotation += 360;
+                
+                wheel.style.transition = 'none';
+                wheel.style.transform = `rotate(${currentRotation}deg)`;
+                requestAnimationFrame(() => {
+                    updateWheelTransition(); 
+                });
+
+                const winningLabel = winningSegment.label || "Special Prize!";
+                const isSpinAgainPrize = winningLabel.toLowerCase().trim() === 'spin again';
+                
+                isSpinning = false;
+                spinButton.disabled = false;
+                spinIcon.classList.add('hidden');
+                spinIcon.classList.remove('animate-spin');
+                spinButton.classList.remove('animate-bounce-click');
+
+                if (isSpinAgainPrize) {
+                    try { 
+                        if (tickSound && tickSound.HAVE_ENOUGH_DATA) {
+                            tickSound.currentTime = 0;
+                            tickSound.play().catch(e => console.warn("Tick sound (for spin again) error:", e));
+                        }
+                    } catch(e) { console.warn("Audio API error (tick for spin again):", e); }
+
+                    if (wheel) {
+                        wheel.classList.add('wheel-flash-spin-again');
+                        setTimeout(() => {
+                            wheel.classList.remove('wheel-flash-spin-again');
+                        }, 600); 
+                    }
+
+                    congratsTitle.textContent = "Spin Again!";
+                    resultInfoText.textContent = "You landed on:";
+                    resultText.textContent = winningLabel; 
+                    resultText.style.color = winningSegment.color; 
+                    popupActionButton.textContent = "Spin Now!";
+                    resultPopup.dataset.action = 'spinAgain'; 
+                } else { 
+                    const congratulationsMessages = ["Woohoo!", "Awesome!", "Incredible!", "You got it!", "Fantastic!"];
+                    congratsTitle.textContent = congratulationsMessages[Math.floor(Math.random() * congratulationsMessages.length)] + " 🎉";
+                    resultInfoText.textContent = "You've won:"; 
+                    resultText.textContent = winningLabel; 
+                    resultText.style.color = winningSegment.color; 
+                    popupActionButton.textContent = "Awesome!"; 
+                    resultPopup.dataset.action = 'close'; 
+
+                    if (typeof confetti === 'function') { confetti({ particleCount: 180, spread: 100, origin: { y: 0.55 }, colors: [winningSegment.color, '#FFFFFF', '#FFD700', '#fecaca'] }); }
+                    try { if (winSound.HAVE_ENOUGH_DATA) { winSound.currentTime = 0; winSound.play().catch(e => console.warn("Win sound error:", e)); }
+                    } catch (e) { console.warn("Audio API error (win):", e); }
+                }
+                showResultPopup(); 
+            }, spinDurationBase);
+        }
+        
+        function populateCustomizationForm(count, sourceDataArray = null) { 
+            segmentInputsContainer.innerHTML = '';
+            let tempSegmentsData = [];
+
+            if (sourceDataArray) { 
+                tempSegmentsData = JSON.parse(JSON.stringify(sourceDataArray));
+            } else { 
+                for (let i = 0; i < segmentsConfig.length; i++) {
+                    tempSegmentsData.push({ ...segmentsConfig[i] });
+                }
+            }
+
+            while (tempSegmentsData.length < count) {
+                const i = tempSegmentsData.length;
+                tempSegmentsData.push({ label: `Prize ${i + 1}`, color: baseColors[i % baseColors.length], probability: 0 });
+            }
+            if (tempSegmentsData.length > count) {
+                tempSegmentsData = tempSegmentsData.slice(0, count);
+            }
+            
+            let totalProbForDisplay = tempSegmentsData.reduce((sum, seg) => sum + (parseFloat(seg.probability) || 0), 0);
+            if (count > 0) {
+                if (Math.abs(totalProbForDisplay - 1.0) > 0.001 && totalProbForDisplay > 0) {
+                    const factor = 1.0 / totalProbForDisplay;
+                    tempSegmentsData.forEach(seg => seg.probability = (parseFloat(seg.probability) || 0) * factor);
+                } else if (totalProbForDisplay === 0) { 
+                    tempSegmentsData.forEach(seg => seg.probability = 1 / count);
+                }
+            }
+
+            tempSegmentsData.forEach((segment, i) => {
+                const segmentDiv = document.createElement('div');
+                segmentDiv.classList.add('p-3', 'bg-slate-700/30', 'rounded-lg', 'border', 'border-purple-600/30', 'space-y-2', 'relative');
+                segmentDiv.innerHTML = `
+                    <button type="button" class="delete-segment-button absolute top-2 right-2 text-red-400 hover:text-red-300 p-1 focus:outline-none focus:ring-1 focus:ring-red-500 rounded" data-index="${i}" title="Delete Prize">
+                        <i class="fas fa-trash-alt fa-sm"></i>
+                    </button>
+                    <p class="text-sm font-medium text-purple-300 mr-8">Prize #${i + 1}</p>
+                    <div><label for="segmentName-${i}" class="block text-xs text-slate-300 mb-0.5">Name:</label><input type="text" id="segmentName-${i}" value="${segment.label}" class="w-full p-2 bg-slate-600/50 border border-purple-500/40 rounded-md text-white text-sm focus:ring-purple-400 focus:border-purple-400 placeholder-slate-400"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label for="segmentColor-${i}" class="block text-xs text-slate-300 mb-0.5">Color:</label><input type="color" id="segmentColor-${i}" value="${segment.color}" class="w-full h-10 p-1 bg-slate-600/50 border border-purple-500/40 rounded-md cursor-pointer"></div>
+                        <div><label for="segmentProb-${i}" class="block text-xs text-slate-300 mb-0.5">Probability (0-1):</label><input type="number" id="segmentProb-${i}" value="${(typeof segment.probability === 'number' ? segment.probability : 0).toFixed(3)}" step="0.01" min="0" max="1" class="w-full p-2 bg-slate-600/50 border border-purple-500/40 rounded-md text-white text-sm focus:ring-purple-400 focus:border-purple-400 placeholder-slate-400"></div>
+                    </div>`;
+                segmentInputsContainer.appendChild(segmentDiv);
+            });
+        }
+
+        segmentInputsContainer.addEventListener('click', (event) => { 
+            const deleteButton = event.target.closest('.delete-segment-button');
+            if (deleteButton) {
+                const indexToDelete = parseInt(deleteButton.dataset.index);
+                
+                const currentNumSegmentsInForm = segmentInputsContainer.querySelectorAll('.p-3.bg-slate-700\\/30').length;
+                if (currentNumSegmentsInForm <= 2) {
+                     alert("You need at least 2 prizes.");
+                     return;
+                }
+
+                let currentLiveFormData = [];
+                for (let i = 0; i < currentNumSegmentsInForm; i++) {
+                    const nameEl = document.getElementById(`segmentName-${i}`);
+                    const colorEl = document.getElementById(`segmentColor-${i}`);
+                    const probEl = document.getElementById(`segmentProb-${i}`);
+                    if (nameEl && colorEl && probEl) { 
+                        currentLiveFormData.push({
+                            label: nameEl.value,
+                            color: colorEl.value,
+                            probability: parseFloat(probEl.value) || 0
+                        });
+                    }
+                }
+                
+                currentLiveFormData.splice(indexToDelete, 1);
+                numSegmentsInput.value = currentLiveFormData.length;
+                populateCustomizationForm(currentLiveFormData.length, currentLiveFormData);
+            }
+        });
+
+        function openCustomizationPanel() { 
+            numSegmentsInput.value = segmentsConfig.length > 0 ? segmentsConfig.length : 2; 
+            populateCustomizationForm(parseInt(numSegmentsInput.value), segmentsConfig); 
+            customizationPanel.classList.remove('hidden', 'panel-leave-active', 'panel-enter');
+            requestAnimationFrame(() => { customizationPanel.classList.add('panel-enter-active'); });
+        }
+        function closeCustomizationPanel() { 
+            customizationPanel.classList.remove('panel-enter-active'); customizationPanel.classList.add('panel-leave-active');
+            setTimeout(() => { customizationPanel.classList.add('hidden'); }, 200);
+        }
+
+        numSegmentsInput.addEventListener('change', () => { 
+            let newCount = parseInt(numSegmentsInput.value); 
+            newCount = Math.max(2, Math.min(16, newCount)); 
+            numSegmentsInput.value = newCount;
+
+            let currentFormData = [];
+            const existingPrizeDivs = segmentInputsContainer.querySelectorAll('.p-3.bg-slate-700\\/30'); 
+            for (let i = 0; i < existingPrizeDivs.length; i++) {
+                const nameEl = document.getElementById(`segmentName-${i}`);
+                const colorEl = document.getElementById(`segmentColor-${i}`);
+                const probEl = document.getElementById(`segmentProb-${i}`);
+                if (nameEl && colorEl && probEl) {
+                    currentFormData.push({
+                        label: nameEl.value,
+                        color: colorEl.value,
+                        probability: parseFloat(probEl.value) || 0
+                    });
+                }
+            }
+            populateCustomizationForm(newCount, currentFormData);
+        });
+
+        applyCustomizationButton.addEventListener('click', () => { 
+            const newNumSegmentsVal = parseInt(numSegmentsInput.value); 
+            let newConfig = []; 
+            let totalProbability = 0;
+            for (let i = 0; i < newNumSegmentsVal; i++) {
+                const name = document.getElementById(`segmentName-${i}`).value.trim() || `Prize ${i+1}`;
+                const color = document.getElementById(`segmentColor-${i}`).value;
+                let probability = parseFloat(document.getElementById(`segmentProb-${i}`).value);
+                if (isNaN(probability) || probability < 0) probability = 0; 
+                newConfig.push({ label: name, color: color, probability: probability }); 
+                totalProbability += probability;
+            }
+
+            if (newConfig.length < 2) {
+                alert("Please configure at least 2 prizes.");
+                return;
+            }
+
+            if (totalProbability > 0) { 
+                const factor = 1.0 / totalProbability; 
+                newConfig.forEach(seg => seg.probability *= factor); 
+            } else if (newConfig.length > 0) { 
+                newConfig.forEach(seg => seg.probability = 1 / newConfig.length); 
+            }
+            segmentsConfig = newConfig; 
+            spinButton.disabled = true;
+
+            wheel.style.transition = 'none';
+            currentRotation %= 360; 
+            if (currentRotation < 0) currentRotation += 360;
+            wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+            initWheel(); 
+
+            requestAnimationFrame(() => { 
+                const showcaseFullSpins = 3; 
+                const randomSettleOffset = (Math.random() * 120) - 60; 
+                const showcaseDuration = 2000; 
+                const showcaseTiming = 'cubic-bezier(0.45, 0.05, 0.55, 0.95)'; 
+
+                const targetShowcaseRotation = currentRotation + (showcaseFullSpins * 360) + randomSettleOffset;
+                
+                wheel.style.transition = `transform ${showcaseDuration}ms ${showcaseTiming}`;
+                wheel.style.transform = `rotate(${targetShowcaseRotation}deg)`;
+                
+                currentRotation = targetShowcaseRotation;
+
+                setTimeout(() => {
+                    currentRotation %= 360;
+                    if (currentRotation < 0) currentRotation += 360;
+
+                    wheel.style.transition = 'none'; 
+                    wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+                    requestAnimationFrame(() => {
+                        updateWheelTransition(); 
+                        spinButton.disabled = (segmentsConfig.length === 0);
+                    });
+                }, showcaseDuration);
+            });
+            
+            closeCustomizationPanel();
+        });
+
+        function _handleVisualResetAndReinit() {
+            wheel.style.transition = 'none';
+            currentRotation %= 360;
+            if (currentRotation < 0) currentRotation += 360;
+            wheel.style.transform = `rotate(${currentRotation}deg)`;
+            
+            requestAnimationFrame(() => { 
+                initWheel();
+                updateWheelTransition(); 
+            });
+        }
+
+        function toggleFullScreen() { 
+             if (!document.fullscreenElement && !document.mozFullScreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+                if (mainElement.requestFullscreen) { mainElement.requestFullscreen(); } 
+                else if (mainElement.msRequestFullscreen) { mainElement.msRequestFullscreen(); } 
+                else if (mainElement.mozRequestFullScreen) { mainElement.mozRequestFullScreen(); } 
+                else if (mainElement.webkitRequestFullscreen) { mainElement.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT); }
+            } else {
+                if (document.exitFullscreen) { document.exitFullscreen(); } 
+                else if (document.msExitFullscreen) { document.msExitFullscreen(); } 
+                else if (document.mozCancelFullScreen) { document.mozCancelFullScreen(); } 
+                else if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); }
+            }
+        }
+        function handleFullscreenChange() { 
+            const isFs = !!(document.fullscreenElement || document.mozFullScreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+            if (isFs) {
+                fullscreenIcon.classList.remove('fa-expand'); fullscreenIcon.classList.add('fa-compress');
+                fullscreenButton.title = "Exit Fullscreen";
+                mainElement.classList.add('fullscreen-active');
+            } else {
+                fullscreenIcon.classList.remove('fa-compress'); fullscreenIcon.classList.add('fa-expand');
+                fullscreenButton.title = "Enter Fullscreen";
+                mainElement.classList.remove('fullscreen-active');
+            }
+            setTimeout(_handleVisualResetAndReinit, 150);
+        }
+        fullscreenButton.addEventListener('click', toggleFullScreen);
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+        openSettingsButton.addEventListener('click', openCustomizationPanel);
+        closeCustomizationPanelButton.addEventListener('click', closeCustomizationPanel);
+        
+        spinButton.addEventListener('click', () => {
+            if (!resultPopup.classList.contains('hidden')) {
+                hideResultPopup(false); 
+                return;
+            }
+            spinWheel();
+        });
+
+        popupActionButton.addEventListener('click', () => {
+            const action = resultPopup.dataset.action;
+            hideResultPopup(action === 'spinAgain'); 
+        });
+
+        dismissPopupButton.addEventListener('click', () => {
+            hideResultPopup(false); 
+        });
+
+        updateWheelTransition(); 
+        initWheel(); 
+        spinButton.disabled = (segmentsConfig.length === 0); 
+
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(_handleVisualResetAndReinit, 250);
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // ... (other const declarations remain the same) ...
+        const spinSound = document.getElementById('spinSound');
+        const tickSound = document.getElementById('tickSound');
+        const winSound = document.getElementById('winSound');
+        // ... (rest of the variables) ...
+
+        // ... (segmentsConfig and other initializations) ...
+
+        function playTickSound() {
+            try {
+                // The HAVE_ENOUGH_DATA check can be helpful but play() returning a promise
+                // that is caught is the more modern way to handle playback issues.
+                // For simplicity and relying on modern browser behavior:
+                tickSound.currentTime = 0;
+                tickSound.play().catch(e => console.warn("Tick sound play error:", e));
+            } catch (e) {
+                console.warn("Audio API error (tick sound function):", e);
+            }
+        }
+
+        function spinWheel() {
+            if (isSpinning || segmentsConfig.length === 0) return;
+            isSpinning = true;
+            spinButton.disabled = true; spinButton.classList.add('animate-bounce-click');
+            spinIcon.classList.remove('hidden'); spinIcon.classList.add('animate-spin');
+            
+            updateWheelTransition();
+
+            // Start looping spin sound
+            try {
+                spinSound.currentTime = 0; // Reset to start
+                spinSound.play().catch(e => console.warn("Spin sound play error:", e));
+            } catch (e) {
+                console.warn("Audio API error (starting spin sound):", e);
+            }
+
+            const totalTicks = numSegments * approxFullSpins * 1.5; 
+            const tickInterval = spinDurationBase / totalTicks;
+            if (tickIntervalId) clearInterval(tickIntervalId); 
+            tickIntervalId = setInterval(playTickSound, tickInterval);
+
+            const winningSegmentIndex = getWeightedResult();
+            if (winningSegmentIndex === -1) {
+                isSpinning = false; spinButton.disabled = false; spinIcon.classList.add('hidden'); spinIcon.classList.remove('animate-spin');
+                // Ensure spin sound stops if we bail out early
+                try { spinSound.pause(); } catch(e) { console.warn("Audio API error (pausing spin sound on early exit):", e); }
+                if (tickIntervalId) clearInterval(tickIntervalId);
+                return;
+            }
+            const winningSegment = segmentsConfig[winningSegmentIndex];
+            // ... (rest of the rotation logic) ...
+            
+            const newRotation = currentRotation + fullSpinsVal + rotationForSegment;
+            
+            wheel.style.transform = `rotate(${newRotation}deg)`; 
+            
+            setTimeout(() => {
+                clearInterval(tickIntervalId);
+                tickIntervalId = null;
+                
+                // Pause looping spin sound
+                try {
+                    spinSound.pause();
+                } catch (e) {
+                    console.warn("Audio API error (pausing spin sound):", e);
+                }
+                
+                // ... (currentRotation and wheel style updates) ...
+
+                const winningLabel = winningSegment.label || "Special Prize!";
+                const isSpinAgainPrize = winningLabel.toLowerCase().trim() === 'spin again';
+                
+                // ... (isSpinning, spinButton, spinIcon updates) ...
+
+                if (isSpinAgainPrize) {
+                    // Play a specific sound for "Spin Again" (using tickSound again here)
+                    try {
+                        tickSound.currentTime = 0;
+                        tickSound.play().catch(e => console.warn("Spin again sound (tick) error:", e));
+                    } catch(e) {
+                        console.warn("Audio API error (tick for spin again):", e);
+                    }
+
+                    // ... (rest of "Spin Again" UI updates) ...
+                } else { 
+                    // Play general win sound
+                    try {
+                        winSound.currentTime = 0;
+                        winSound.play().catch(e => console.warn("Win sound play error:", e));
+                    } catch (e) {
+                        console.warn("Audio API error (win sound):", e);
+                    }
+                    
+                    if (typeof confetti === 'function') { /* ... confetti ... */ }
+                    // ... (rest of general win UI updates) ...
+                }
+                showResultPopup(); 
+            }, spinDurationBase);
+        }
+        
+        // ... (rest of the JavaScript: populateCustomizationForm, panel functions, fullscreen, event listeners, initWheel) ...
+
+        // Initial setup calls
+        updateWheelTransition(); 
+        initWheel(); 
+        spinButton.disabled = (segmentsConfig.length === 0); 
+
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(_handleVisualResetAndReinit, 250);
+        });
+    });
+
+    </script>
+</body>
+</html>
